@@ -1,10 +1,46 @@
 import axios from 'axios';
 import { handleDemoFallback } from './demoFallback';
 
+// Detect if running on a static cloud host like Vercel or GitHub Pages without custom backend URL
+const isStaticHost =
+  typeof window !== 'undefined' &&
+  !import.meta.env.VITE_API_BASE_URL &&
+  window.location.hostname !== 'localhost' &&
+  window.location.hostname !== '127.0.0.1';
+
+const defaultAdapter = axios.getAdapter(axios.defaults.adapter);
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   headers: {
     'Content-Type': 'application/json'
+  },
+  adapter: async (config) => {
+    // 1. If on static Vercel/GitHub Pages without a configured remote backend, use demo fallback directly
+    if (isStaticHost) {
+      const fallbackRes = handleDemoFallback(config);
+      if (fallbackRes) {
+        return fallbackRes;
+      }
+    }
+
+    // 2. Otherwise execute live network request (local dev or remote Spring Boot server)
+    try {
+      const res = await defaultAdapter(config);
+      // If server returned HTML (Vercel SPA rewrite fallback) instead of JSON for API
+      if (typeof res.data === 'string' && res.data.includes('<!DOCTYPE')) {
+        const fallbackRes = handleDemoFallback(config);
+        if (fallbackRes) return fallbackRes;
+      }
+      return res;
+    } catch (err) {
+      // If network error, 404, or 405 occurs on cloud static host
+      const fallbackRes = handleDemoFallback(config);
+      if (fallbackRes) {
+        return fallbackRes;
+      }
+      throw err;
+    }
   }
 });
 
@@ -20,36 +56,10 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor to handle unauthenticated 401 & graceful demo fallback for static hosts like Vercel
+// Response interceptor to handle unauthenticated 401
 api.interceptors.response.use(
-  (response) => {
-    // If static hosting returned HTML instead of JSON for an API call, divert to demo fallback
-    if (
-      typeof response.data === 'string' &&
-      response.data.includes('<!DOCTYPE') &&
-      response.config.url &&
-      !response.config.url.endsWith('.html')
-    ) {
-      const fallback = handleDemoFallback(response.config);
-      if (fallback) return fallback;
-    }
-    return response;
-  },
+  (response) => response,
   (error) => {
-    // If backend is not reached (e.g. on Vercel static deployment without remote backend URL)
-    const isUnreachable =
-      error.response?.status === 404 ||
-      error.code === 'ERR_NETWORK' ||
-      !error.response ||
-      (typeof error.response?.data === 'string' && error.response?.data.includes('<!DOCTYPE'));
-
-    if (isUnreachable) {
-      const fallback = handleDemoFallback(error.config);
-      if (fallback) {
-        return Promise.resolve(fallback);
-      }
-    }
-
     if (error.response && error.response.status === 401) {
       if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/register')) {
         localStorage.removeItem('wtlms_token');

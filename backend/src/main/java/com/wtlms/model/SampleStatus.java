@@ -1,0 +1,13 @@
+package com.wtlms.model;
+
+public enum SampleStatus {
+    REQUESTED,
+    REGISTERED,
+    SAMPLE_RECEIVED,
+    TESTING_IN_PROGRESS,
+    TESTING_COMPLETED,
+    REPORT_PENDING_APPROVAL,
+    APPROVED,
+    REJECTED,
+    CANCELLED
+}
